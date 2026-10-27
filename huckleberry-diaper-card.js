@@ -463,10 +463,13 @@
 			if ( status === 404 && ( code === 'rest_no_route' || code === 'home_gnome_no_server' || code === 'home_gnome_not_found' ) ) {
 				return 'Home Gnome did not find the diaper entry (' + ( this._config.diaper_entry_id || this._config.diaper_item_id ) + '). Check diaper_entry_id.';
 			}
-			if ( status === 404 ) {
-				return 'Home Gnome\'s API is not reachable through Home Assistant: check home_gnome_entry_id.';
+			if ( code === 'home_gnome_unavailable' ) {
+				return 'Home Gnome is not set up in Home Assistant right now (its integration entry is not loaded). Reload it under Settings › Devices & services.';
 			}
-			return 'Could not list the places with diapers: ' + errorText( err, 'unknown error' );
+			if ( status === 404 ) {
+				return 'Home Gnome\'s API is not reachable through Home Assistant (404' + ( code ? ' ' + code : '' ) + '): ' + errorText( err, 'no detail' ) + '. Check home_gnome_entry_id.';
+			}
+			return 'Could not list the places with diapers (' + ( status || '?' ) + ( code ? ' ' + code : '' ) + '): ' + errorText( err, 'unknown error' );
 		}
 
 		/* ---- logging ---------------------------------------------------------------------- */
