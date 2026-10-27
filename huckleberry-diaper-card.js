@@ -460,8 +460,8 @@
 			if ( code === 'home_gnome_not_linked' || status === 403 && /linked/i.test( errorText( err, '' ) ) ) {
 				return 'You are not linked to a Home Gnome person, so the places cannot be listed. An admin links you on the Home Gnome card in Settings › Devices & services.';
 			}
-			if ( status === 404 && ( code === 'rest_no_route' || code === 'home_gnome_no_server' || code === 'home_gnome_not_found' ) ) {
-				return 'Home Gnome did not find the diaper entry (' + ( this._config.diaper_entry_id || this._config.diaper_item_id ) + '). Check diaper_entry_id.';
+			if ( status === 404 && ( code === 'rest_no_route' || code === 'home_gnome_no_server' || code === 'home_gnome_not_found' || code === 'house_ledger_not_found' ) ) {
+				return 'Home Gnome did not find the diaper entry (' + ( this._config.diaper_entry_id || this._config.diaper_item_id ) + '): ' + errorText( err, 'not found' ) + '. Its id may have changed; open the entry in Home Gnome and read the id from its address.';
 			}
 			if ( code === 'home_gnome_unavailable' ) {
 				return 'Home Gnome is not set up in Home Assistant right now (its integration entry is not loaded). Reload it under Settings › Devices & services.';
