@@ -19,6 +19,10 @@
  *   months: 1–24                                # x-axis span (default: the child's age, rounded up)
  *   events: [ ... ]                             # test fixture instead of the calendar (see README)
  *
+ * The calendar is slow (each read goes to Huckleberry's servers), so the parsed measurements are
+ * kept in this browser's localStorage, keyed by the calendar entity; a later load asks only for
+ * events since the last cached one and merges them in. The ↻ button clears that cache.
+ *
  * The card keeps a global here only to register with the card picker.
  */
 ( () => {
@@ -305,6 +309,98 @@
 		return out;
 	}
 
+	/* ---- the browser cache of parsed events ---------------------------------------------- */
+
+	const CACHE_PREFIX = 'huckleberry-growth:';
+	const CACHE_VERSION = 1;
+
+	/** The localStorage key of a calendar's cache. */
+	function cacheKey( calendarId ) {
+		return CACHE_PREFIX + String( calendarId || '' );
+	}
+
+	/** The cache for a calendar: { entries: [ { time, weight, height, head } ], to } or null. */
+	function readCache( storage, calendarId ) {
+		if ( ! storage || ! calendarId ) {
+			return null;
+		}
+		try {
+			const raw = storage.getItem( cacheKey( calendarId ) );
+			if ( ! raw ) {
+				return null;
+			}
+			const data = JSON.parse( raw );
+			if ( ! data || data.v !== CACHE_VERSION || ! Array.isArray( data.entries ) ) {
+				return null;
+			}
+			const entries = data.entries.filter( ( e ) => e && Number.isFinite( e.time ) ).map( ( e ) => ( {
+				time: e.time, weight: e.weight || null, height: e.height || null, head: e.head || null,
+			} ) );
+			return { entries, to: Number.isFinite( data.to ) ? data.to : NaN };
+		} catch {
+			return null;
+		}
+	}
+
+	/** Writes the cache; a full or refused storage is ignored (the card still works, just slower). */
+	function writeCache( storage, calendarId, entries, to ) {
+		if ( ! storage || ! calendarId ) {
+			return false;
+		}
+		try {
+			storage.setItem( cacheKey( calendarId ), JSON.stringify( { v: CACHE_VERSION, to, entries } ) );
+			return true;
+		} catch {
+			return false;
+		}
+	}
+
+	function clearCache( storage, calendarId ) {
+		try {
+			storage && storage.removeItem( cacheKey( calendarId ) );
+		} catch {
+			// Nothing to clear.
+		}
+	}
+
+	/**
+	 * Cached entries with fresh ones merged in: one entry per time (to the minute); a fresh
+	 * entry replaces the cached one at its time (edits in Huckleberry show up when refetched).
+	 * Sorted by time.
+	 */
+	function mergeEntries( cached, fresh ) {
+		const byTime = new Map();
+		const keyOf = ( e ) => Math.round( e.time / SAME_MEASUREMENT_MS );
+		for ( const e of cached || [] ) {
+			if ( e && Number.isFinite( e.time ) ) {
+				byTime.set( keyOf( e ), e );
+			}
+		}
+		for ( const e of fresh || [] ) {
+			if ( e && Number.isFinite( e.time ) ) {
+				byTime.set( keyOf( e ), e );
+			}
+		}
+		return [ ...byTime.values() ].sort( ( a, b ) => a.time - b.time );
+	}
+
+	/**
+	 * Where the next calendar read starts: a day before the last cached event (or the cached
+	 * read's end, when it found none) so that event is read again and deduped; with no cache,
+	 * a day before birth (or two years back when the birth date is unknown).
+	 */
+	function fetchStart( cache, birth, now ) {
+		const n = now || Date.now();
+		if ( cache ) {
+			const last = cache.entries.length ? cache.entries[ cache.entries.length - 1 ].time : NaN;
+			const from = Number.isFinite( last ) ? last : cache.to;
+			if ( Number.isFinite( from ) ) {
+				return Math.min( from, n ) - 86400000;
+			}
+		}
+		return Number.isFinite( birth ) ? birth - 86400000 : n - 2 * 366 * 86400000;
+	}
+
 	/** [L, M, S] at an age in months, interpolated between the table's months; null off the table. */
 	function lmsAt( measure, sex, months ) {
 		const table = WHO[ measure ] && WHO[ measure ][ sex ];
@@ -588,6 +684,19 @@
 		.head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
 		.title { font-size: 1.25rem; font-weight: 500; color: var(--primary-text-color); line-height: 1.3; }
 		.sub { font-size: 0.875rem; color: var(--secondary-text-color); line-height: 1.3; }
+		.side { display: flex; align-items: center; gap: 4px; }
+		.refresh {
+			appearance: none; -webkit-appearance: none; cursor: pointer; margin: -8px -8px -8px 0; padding: 0;
+			width: 40px; height: 40px; border-radius: 20px; border: 0; background: transparent; color: var(--secondary-text-color);
+			display: inline-flex; align-items: center; justify-content: center; -webkit-tap-highlight-color: transparent;
+		}
+		.refresh ha-icon { --mdc-icon-size: 22px; }
+		.refresh:hover { color: var(--primary-color); }
+		.refresh:focus-visible { outline: 2px solid var(--primary-color); }
+		.refresh:disabled { cursor: default; }
+		.refresh.spinning ha-icon { animation: spin 1s linear infinite; }
+		.refresh[hidden] { display: none; }
+		@keyframes spin { to { transform: rotate(360deg); } }
 		.tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-bottom: 12px; }
 		.tile {
 			appearance: none; -webkit-appearance: none; font: inherit; cursor: pointer; margin: 0;
@@ -637,7 +746,8 @@
 			this._hass = null;
 			this._measure = 'weight';
 			this._selected = -1;
-			this._events = [];
+			this._entries = []; // parsed calendar events (cached + fetched)
+			this._cachedAt = NaN; // when the cache was last written, for the sub line
 			this._eventsError = '';
 			this._loading = false;
 			this._fetchedKey = '';
@@ -657,7 +767,8 @@
 			this._measure = config.measure || 'weight';
 			this._selected = -1;
 			this._fetchedKey = '';
-			this._events = [];
+			this._entries = [];
+			this._cachedAt = NaN;
 			this._eventsError = '';
 			this._render();
 			if ( this._hass ) {
@@ -770,9 +881,7 @@
 					entries.push( parseFixtureEvent( item ) );
 				}
 			}
-			for ( const ev of this._events ) {
-				entries.push( parseGrowthEvent( ev ) );
-			}
+			entries.push( ...this._entries );
 			entries.push( sensorLatest( this._state( this._config.growth_entity ) ) );
 			return seriesFrom( entries, birth );
 		}
@@ -810,7 +919,7 @@
 				// Not in hass.states: nothing to ask, say so once.
 				this._fetchedKey = key;
 				this._fetchedAt = Date.now();
-				this._events = [];
+				this._entries = [];
 				this._eventsError = id + ' was not found. Set calendar_entity to the child\'s Huckleberry calendar.';
 				return;
 			}
@@ -819,32 +928,72 @@
 			this._fetchEvents( id, key );
 		}
 
-		async _fetchEvents( id, key ) {
+		_storage() {
+			try {
+				return typeof localStorage !== 'undefined' ? localStorage : null;
+			} catch {
+				return null;
+			}
+		}
+
+		/**
+		 * The calendar's growth events: the cached ones at once, then only those since the last
+		 * cached one from Home Assistant's calendar API, merged and cached again. `all` reads
+		 * everything from birth (the ↻ button).
+		 */
+		async _fetchEvents( id, key, all ) {
 			const birth = this._birth();
-			const start = new Date( Number.isFinite( birth ) ? birth - 86400000 : Date.now() - 2 * 366 * 86400000 );
-			const end = new Date( Date.now() + 86400000 );
+			const storage = this._storage();
+			const cache = all ? null : readCache( storage, id );
+			if ( cache ) {
+				this._entries = cache.entries;
+				this._cachedAt = cache.to;
+			}
+			const now = Date.now();
+			const start = new Date( fetchStart( cache, birth, now ) );
+			const end = new Date( now + 86400000 );
 			this._loading = true;
-			this._renderMessages();
+			this._render();
 			try {
 				const events = await this._hass.callApi( 'GET', 'calendars/' + encodeURIComponent( id )
 					+ '?start=' + encodeURIComponent( start.toISOString() ) + '&end=' + encodeURIComponent( end.toISOString() ) );
 				if ( this._fetchedKey !== key ) {
 					return;
 				}
-				this._events = Array.isArray( events ) ? events : [];
+				const fresh = ( Array.isArray( events ) ? events : [] ).map( parseGrowthEvent ).filter( Boolean );
+				this._entries = mergeEntries( cache ? cache.entries : [], fresh );
 				this._eventsError = '';
+				if ( writeCache( storage, id, this._entries, now ) ) {
+					this._cachedAt = now;
+				}
 			} catch ( err ) {
 				if ( this._fetchedKey !== key ) {
 					return;
 				}
-				this._events = [];
-				this._eventsError = 'Could not read ' + id + ': ' + errorText( err, 'unknown error' );
+				if ( ! cache ) {
+					this._entries = [];
+				}
+				this._eventsError = 'Could not read ' + id + ': ' + errorText( err, 'unknown error' ) + ( cache ? ' Showing the measurements cached in this browser.' : '' );
 			} finally {
 				if ( this._fetchedKey === key ) {
 					this._loading = false;
 				}
 			}
 			this._render();
+		}
+
+		/** The ↻ button: forget this browser's copy and read the whole calendar again. */
+		_refresh() {
+			const id = this._calendarId();
+			if ( ! id || this._loading ) {
+				return;
+			}
+			clearCache( this._storage(), id );
+			this._entries = [];
+			this._cachedAt = NaN;
+			this._fetchedKey = this._fetchKey();
+			this._fetchedAt = Date.now();
+			this._fetchEvents( id, this._fetchedKey, true );
 		}
 
 		/* ---- rendering ------------------------------------------------------------------- */
@@ -857,7 +1006,10 @@
 					<ha-card>
 						<div class="head">
 							<div class="title"></div>
-							<div class="sub"></div>
+							<div class="side">
+								<div class="sub"></div>
+								<button type="button" class="refresh" aria-label="Read the calendar again" title="Read every measurement from the calendar again (clears this browser's copy)"><ha-icon icon="mdi:refresh"></ha-icon></button>
+							</div>
 						</div>
 						<div class="tiles" role="tablist" aria-label="Measure"></div>
 						<div class="chart"></div>
@@ -868,6 +1020,7 @@
 				this._el = {
 					title: root.querySelector( '.title' ),
 					sub: root.querySelector( '.sub' ),
+					refresh: root.querySelector( '.refresh' ),
 					tiles: root.querySelector( '.tiles' ),
 					chart: root.querySelector( '.chart' ),
 					caption: root.querySelector( '.caption' ),
@@ -887,6 +1040,7 @@
 					} );
 					this._el.tiles.appendChild( b );
 				}
+				this._el.refresh.addEventListener( 'click', () => this._refresh() );
 				this._el.chart.addEventListener( 'click', ( ev ) => this._tapPoint( ev ) );
 				this._el.chart.addEventListener( 'keydown', ( ev ) => {
 					if ( ev.key === 'Enter' || ev.key === ' ' ) {
@@ -903,6 +1057,10 @@
 			this._el.title.textContent = this._childName();
 			const age = ageText( birth, now );
 			this._el.sub.textContent = [ age, sex === 'boy' ? 'boy' : 'girl', 'WHO percentiles' ].filter( Boolean ).join( ' · ' );
+			const calendar = this._calendarId();
+			this._el.refresh.hidden = ! calendar || ! this._state( calendar );
+			this._el.refresh.disabled = this._loading;
+			this._el.refresh.classList.toggle( 'spinning', this._loading );
 			for ( const b of this._el.tiles.querySelectorAll( '.tile' ) ) {
 				const id = b.dataset.measure;
 				const list = this._data.series[ id ];
@@ -985,8 +1143,8 @@
 			} else if ( this._data.todayMonths > MAX_MONTHS ) {
 				parts.push( '<div class="note">The WHO tables here cover 0–24 months; later measurements have no percentile.</div>' );
 			}
-			if ( this._loading && ! this._events.length ) {
-				parts.push( '<div class="note">Reading measurements from the calendar…</div>' );
+			if ( this._loading ) {
+				parts.push( '<div class="note">' + ( this._entries.length ? 'Looking for newer measurements in the calendar…' : 'Reading measurements from the calendar…' ) + '</div>' );
 			}
 			if ( this._eventsError ) {
 				parts.push( '<div class="warn">' + escapeHtml( this._eventsError ) + '</div>' );
@@ -1094,6 +1252,7 @@
 		parseMeasurement, toMetric, fromMetric, parseWhen, parseGrowthEvent, sensorLatest, parseFixtureEvent,
 		ageMonths, seriesFrom, lmsAt, zScore, valueAtZ, normalCdf, percentileOf, ordinal, sexFrom, defaultSpan,
 		niceTicks, formatValue, ageText, chartSvg, errorText,
+		cacheKey, readCache, writeCache, clearCache, mergeEntries, fetchStart,
 	};
 	if ( typeof module !== 'undefined' && module.exports ) {
 		module.exports = logic;

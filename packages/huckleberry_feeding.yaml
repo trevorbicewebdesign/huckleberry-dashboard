@@ -1,0 +1,54 @@
+# Helpers for the Huckleberry feeding card: the bottle in progress, shared by every phone.
+#
+# Copy this file into your Home Assistant config as packages/huckleberry_feeding.yaml (keep the
+# underscore: Home Assistant names a package after its file and refuses hyphens) and make
+# sure configuration.yaml loads packages:
+#
+#   homeassistant:
+#     packages: !include_dir_named packages
+#
+# then restart Home Assistant. One set per household is enough (the card holds one open bottle
+# at a time). To rename them, change the "huckleberry_" prefix here and set the card's
+# helper_prefix to the same word. Amounts are in the card's units (oz by default).
+
+input_datetime:
+  huckleberry_bottle_started:
+    name: Huckleberry bottle started
+    icon: mdi:clock-start
+    has_date: true
+    has_time: true
+
+input_number:
+  huckleberry_bottle_prepared:
+    name: Huckleberry bottle prepared
+    icon: mdi:baby-bottle-outline
+    min: 0
+    max: 2000
+    step: 0.5
+    mode: box
+  huckleberry_bottle_had:
+    name: Huckleberry bottle had
+    icon: mdi:baby-bottle
+    min: 0
+    max: 2000
+    step: 0.5
+    mode: box
+
+input_select:
+  huckleberry_bottle_type:
+    name: Huckleberry bottle type
+    icon: mdi:cup-outline
+    options:
+      - formula
+      - breast_milk
+      - tube_feeding
+      - cow_milk
+      - goat_milk
+      - soy_milk
+      - other
+
+input_text:
+  huckleberry_bottle_note:
+    name: Huckleberry bottle note
+    icon: mdi:note-text-outline
+    max: 255

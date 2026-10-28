@@ -17,7 +17,7 @@ global.customElements = { _defs: {}, get( n ) { return this._defs[ n ]; }, defin
 global.window = {};
 global.document = { createElement() { return {}; } };
 
-const logic = require( path.join( __dirname, '..', 'huckleberry-diaper-card.js' ) );
+const logic = require( path.join( __dirname, '..', 'dist', 'huckleberry-diaper-card.js' ) );
 const { sizeRowsFor, canLog, huckleberryCall, scriptCall, placesFrom, defaultPlace, errorText, relative } = logic;
 
 let passed = 0;

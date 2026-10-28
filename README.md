@@ -1,16 +1,62 @@
-# Huckleberry cards for Home Assistant
+# Huckleberry dashboard cards for Home Assistant
 
-Two custom cards for the Huckleberry baby tracker as brought into Home Assistant by
+Custom cards for the Huckleberry baby tracker as brought into Home Assistant by
 [Woyken's Huckleberry integration](https://github.com/Woyken/huckleberry-homeassistant):
 
-- **[Huckleberry diaper card](#huckleberry-diaper-card)** (`huckleberry-diaper-card.js`): log a diaper
-  change in Huckleberry and take a diaper from a Home Gnome place, in one tap.
-- **[Huckleberry growth card](#huckleberry-growth-card)** (`huckleberry-growth-card.js`): the child's
-  weight, length and head circumference plotted against the WHO percentile curves.
+- **[Huckleberry diaper card](#huckleberry-diaper-card)**: log a diaper change in Huckleberry and
+  take a diaper from a Home Gnome place, in one tap.
+- **[Huckleberry feeding card](#huckleberry-feeding-card)**: start a bottle, then log in
+  Huckleberry what the child actually had (Huckleberry cannot edit a logged bottle).
+- **[Huckleberry sleep card](#huckleberry-sleep-card)**: the sleep timer with start, pause,
+  resume and complete, a live "sleeping since" line, a start-time correction and a form for a
+  past sleep.
+- **[Huckleberry recent card](#huckleberry-recent-card)**: the last days' diapers, bottles,
+  solids, sleeps and growth, newest first and by day, from Home Assistant's own history, with
+  "Load older" reaching back through the Huckleberry calendar.
+- **[Huckleberry growth card](#huckleberry-growth-card)**: the child's weight, length and head
+  circumference plotted against the WHO percentile curves.
 
-Each card is one file with no build step and no framework. Install each the same way: copy the
-file into `config/www/` and add it as its own JavaScript module resource (one resource per file).
-Home Assistant 2025.3 or later.
+Every card is one plain JavaScript file in `dist/`, with no build step and no framework, a
+form in the card picker, and the theme's colours. Home Assistant 2025.3 or later.
+
+## Install
+
+One resource loads every card: `dist/huckleberry-dashboard.js` imports the card files beside it.
+
+### With HACS
+
+1. **HACS › ⋮ › Custom repositories**: add `https://github.com/trevorbicewebdesign/huckleberry-dashboard`
+   as a **Dashboard** repository, then download **Huckleberry dashboard**.
+2. HACS registers the resource `/hacsfiles/huckleberry-dashboard/huckleberry-dashboard.js` itself
+   (it downloads the whole `dist/` folder). If you had installed single card files by hand before,
+   remove their `/local/…` resources under **Settings › Dashboards › ⋮ › Resources**, so each card
+   is defined once.
+3. Reload the browser (the companion app: pull down, or close and reopen). Updates come through
+   HACS like any other.
+
+### By hand
+
+1. Copy the `dist/` folder into your config as `config/www/community/huckleberry-dashboard/`
+   (so that `config/www/community/huckleberry-dashboard/huckleberry-dashboard.js` exists; make
+   `www` if it is new and restart Home Assistant once so `/local/` is served).
+2. **Settings › Dashboards › ⋮ › Resources › Add resource**: URL
+   `/local/community/huckleberry-dashboard/huckleberry-dashboard.js`, type **JavaScript module**.
+   (Resources need *Advanced mode* on your profile.)
+3. Reload the browser. To update, copy the new `dist/` over the old one and add `?v=2` (any new
+   number) to the resource URL so phones fetch the files again.
+
+Then, on a dashboard, **Edit › Add card** and pick the card by name, or paste its YAML from the
+sections below into a manual card. The picker's form has every option; YAML is the same keys.
+
+The feeding card also needs a few helpers, made once from [`packages/huckleberry_feeding.yaml`](packages/huckleberry_feeding.yaml)
+(see its section). The sleep card's start-time controls need the Huckleberry integration 0.5.6
+or later.
+
+### Try the checks
+
+`node tests/check.js`, `tests/check-feeding.js`, `tests/check-sleep.js`, `tests/check-recent.js`
+and `tests/check-growth.js` each check one card's logic in Node (nothing to install). Each card's
+section says how to try it on a Home Assistant without Huckleberry.
 
 ## Huckleberry diaper card
 
@@ -31,20 +77,10 @@ It needs:
   `home_gnome.use_one`. Whoever taps Log must be a **linked person** on the Home Gnome server, or
   the places list is empty and the diaper is not taken.
 
-One file, no build step, no framework. Home Assistant 2025.3 or later.
-
 ### Install
 
-1. Copy `huckleberry-diaper-card.js` into your config folder as `config/www/huckleberry-diaper-card.js`
-   (make `www` if it is new, and restart Home Assistant once so `/local/` is served).
-2. **Settings › Dashboards › ⋮ › Resources › Add resource**: URL `/local/huckleberry-diaper-card.js`,
-   type **JavaScript module**. (Resources need *Advanced mode* on your profile.)
-3. Reload the browser (the companion app: pull down, or close and reopen).
-4. On a dashboard, **Edit › Add card › Huckleberry diaper card**, or paste the YAML below into a
-   manual card. The picker's form has every option; YAML is the same keys.
-
-To update, copy the new file over the old one and add `?v=2` (any new number) to the resource URL
-so phones fetch it again.
+See [Install](#install) above: the one resource loads this card too. Then **Edit › Add card ›
+Huckleberry diaper card**, or paste the YAML below.
 
 ### Config
 
@@ -137,6 +173,205 @@ fields:
 - On the real Home Assistant, the first log is best made with "Don't take one" chosen and a
   `dry` check, to see Huckleberry take it before a diaper is counted off the shelf.
 
+## Huckleberry feeding card
+
+Bottles in two steps, because Huckleberry cannot edit a bottle once it is logged. **Start
+bottle** notes how much was prepared, what is in it and a note; nothing goes to Huckleberry
+yet. While the bottle is open the card shows it (started at, prepared amount, contents) with an
+editable **Had** amount, and **Finish** logs it with `huckleberry.log_bottle` (amount = had,
+the start time, the contents, the note). Starting a new bottle finishes an open one first with
+its had amount (the prepared amount when none was entered). The open bottle lives in a few Home
+Assistant helpers, so every phone sees the same bottle.
+
+It needs Woyken's Huckleberry integration (the child's `sensor.<child>_bottle` and the
+`huckleberry.log_bottle` action) and the helpers below.
+
+### Helpers (once per household)
+
+Copy [`packages/huckleberry_feeding.yaml`](packages/huckleberry_feeding.yaml) into your config
+folder as `config/packages/huckleberry_feeding.yaml`, make sure `configuration.yaml` loads
+packages:
+
+```yaml
+homeassistant:
+  packages: !include_dir_named packages
+```
+
+and restart Home Assistant. It defines `input_datetime.huckleberry_bottle_started`,
+`input_number.huckleberry_bottle_prepared`, `input_number.huckleberry_bottle_had`,
+`input_select.huckleberry_bottle_type` and `input_text.huckleberry_bottle_note` (no child name:
+one open bottle at a time is enough for a household; for two children copy the file with another
+prefix and set `helper_prefix`). Until they exist the card says which are missing and keeps the
+Start button off.
+
+### Config
+
+```yaml
+type: custom:huckleberry-feeding-card
+bottle_entity: sensor.<child>_bottle   # the child's "last bottle" sensor (required)
+```
+
+All keys:
+
+| Key | Default | What |
+| --- | --- | --- |
+| `bottle_entity` | required | The child's bottle sensor from Huckleberry, `sensor.<child>_bottle`. Its state and attributes (`time`, `amount`, `units`, `type`) are shown as the last bottle. |
+| `child_name` | the sensor's friendly name without "Bottle" | The card's title. |
+| `huckleberry_device_id` | the device that owns `bottle_entity` | The child's device, which `huckleberry.log_bottle` takes. |
+| `helper_prefix` | `huckleberry` | The helpers' prefix: `input_number.<prefix>_bottle_prepared` and so on. |
+| `units` | `oz` | `oz` or `ml`: the unit of every amount on the card and in the helpers, sent to Huckleberry as `units`. Give every feeding card the same. |
+| `default_amount` | 4 oz / 120 ml | The prepared amount preselected. |
+| `step` | 0.5 oz / 10 ml | What − and + add or take. |
+| `bottle_types` | `[formula, breast_milk]` | The contents offered, from Huckleberry's `formula`, `breast_milk`, `tube_feeding`, `cow_milk`, `goat_milk`, `soy_milk`, `other`. |
+| `default_type` | the first | The contents preselected. |
+
+### What it does
+
+- **Start bottle**: prepared amount (a box with − / + in `step`s), contents (one button each),
+  note. Writes the helpers (`input_datetime.set_datetime` with the start, prepared and had both
+  to the prepared amount, the type, the note). If a bottle is already open it is finished first
+  (below), and the form sits under **Start another bottle…**.
+- **Bottle in progress**: started at and how long ago, prepared amount and contents, the note.
+  **Had** starts at the prepared amount; − / + or typing changes it and writes
+  `input_number.<prefix>_bottle_had` half a second later, so another phone picking the baby up
+  sees the same number.
+- **Finish**: `huckleberry.log_bottle` with `device_id`, `amount` (had, or prepared when had was
+  never changed from 0), `units`, `bottle_type`, `start_time` (the start, with the browser's UTC
+  offset) and `notes` when typed. Then prepared and had go to 0 and the note is cleared, which is
+  what "no bottle open" means. A Huckleberry refusal keeps the bottle open and shows the reason
+  inline.
+- **Last bottle**: from `sensor.<child>_bottle`, with its amount, contents and time.
+
+### Try it
+
+- `node tests/check-feeding.js` checks the helper reading, the writes, the log_bottle call and
+  the amount stepping without a browser.
+- In a dev Home Assistant without Huckleberry: load the package above, set
+  `sensor.<child>_bottle` with `POST /api/states/…` (a timestamp state; attributes `time`,
+  `amount`, `units`, `type`), and give the dev HA a `huckleberry.log_bottle` action (a stub
+  custom integration that registers it and writes a persistent notification is enough).
+  Without one, Finish reports "Huckleberry did not log the bottle: Service huckleberry.log_bottle
+  not found" and keeps the bottle open.
+
+## Huckleberry sleep card
+
+The sleep timer from Huckleberry: **Start sleep**, then **Pause** / **Resume**, **Complete** and
+**Cancel timer**, with a live "Sleeping since 1:05 PM (23 min)" line read from
+`sensor.<child>_sleep`, the previous sleep in the header, a **Started at** time box that moves
+the start of a running timer, and a **Log a past sleep** form (fell asleep, woke up, note) for a
+nap nobody timed.
+
+It needs Woyken's Huckleberry integration: `sensor.<child>_sleep` (states `active`, `paused`,
+`none`; attributes `current_start`, `current_end`, `previous_start`, `previous_duration`) and the
+`huckleberry.start_sleep` / `pause_sleep` / `resume_sleep` / `cancel_sleep` / `complete_sleep`
+actions. **Started at** and **Log a past sleep** use the `start_time` field of `start_sleep` and
+the `log_sleep` action, which came with integration **0.5.6**; on an older integration the card
+hides them and says so.
+
+### Config
+
+```yaml
+type: custom:huckleberry-sleep-card
+sleep_entity: sensor.<child>_sleep   # the child's sleep sensor (required)
+```
+
+All keys:
+
+| Key | Default | What |
+| --- | --- | --- |
+| `sleep_entity` | required | The child's sleep status sensor, `sensor.<child>_sleep`. |
+| `child_name` | the sensor's friendly name without "Sleep" | The card's title. |
+| `huckleberry_device_id` | the device that owns `sleep_entity` | The child's device, which the sleep actions take. |
+| `integration_version` | read from the actions | The installed integration's version, such as `0.5.6`. By default the card looks at the action descriptions Home Assistant sends the browser (`start_sleep` having a `start_time` field and `log_sleep` existing); set this to force the time controls on (`0.5.6`) or off (`0.5.5`). |
+| `log_form` | `true` | Whether **Log a past sleep** is shown (when the integration allows it). |
+
+### What it does
+
+- **Status**: `active` → "Sleeping since <time> (<elapsed>)", ticking every second; `paused` →
+  "Paused at <time> · <elapsed> so far" (elapsed stops at `current_end`); `none` → "Awake".
+- **Buttons** by state: Start sleep; Pause, Complete, Cancel timer; Resume, Complete, Cancel
+  timer. Each calls its `huckleberry.*_sleep` action on the child's device and shows "Done" for a
+  moment, or the refusal inline.
+- **Started at** (running timer, 0.5.6+): a time box holding the timer's start. Changing it calls
+  `huckleberry.start_sleep` with `start_time`, which the integration documents as moving the
+  start of the running session (no cancel and restart, so nothing is lost if the call fails). A
+  time later than now is read as yesterday. Start times in the future are refused before calling.
+- **Log a past sleep** (0.5.6+): fell asleep and woke up (date and time), a note, and a button
+  saying how long that is. Calls `huckleberry.log_sleep` with `start_time`, `end_time` and
+  `notes`. The end must come after the start and not after now.
+- **Previous sleep**: `previous_duration` (an ISO 8601 duration) and `previous_start` in the
+  header.
+- Times are sent with the browser's UTC offset (`2026-10-27T13:05:00-07:00`), which the
+  integration reads as that instant.
+
+### Try it
+
+- `node tests/check-sleep.js` checks the sensor reading, the version detection and every call.
+- In a dev Home Assistant without Huckleberry: set `sensor.<child>_sleep` by hand
+  (`POST /api/states/…` with state `active` and `current_start`), and register stub
+  `huckleberry.start_sleep` … `log_sleep` actions with a `services.yaml` that lists `start_time`
+  on `start_sleep`, or set `integration_version: 0.5.6` on the card and `0.5.5` on a second one
+  to see both faces.
+
+## Huckleberry recent card
+
+A newest-first list of the child's events, grouped by day: diapers (kind, sizes when known),
+bottles (amount and contents), solids (foods), sleeps (duration, and the one running now), and
+growth measurements. The last `days` days come from Home Assistant's **recorder**, the history of
+the child's own sensors, so the list is there at once and never asks Huckleberry. **Load older**
+at the bottom reads the month before what is shown from `calendar.<child>_events` (which does
+ask Huckleberry) and appends it; tap again for the month before that.
+
+It needs Woyken's Huckleberry integration's sensors (`sensor.<child>_diaper`, `_bottle`,
+`_solids`, `_sleep`, `_growth`; any that exist) and, for older events, `calendar.<child>_events`.
+The recorder must keep those sensors (it does unless you excluded them) for as many days as
+`days`, which is the recorder's default of 10.
+
+### Config
+
+```yaml
+type: custom:huckleberry-recent-card
+child: <slug>   # the middle of the entity ids: "rose" for sensor.rose_diaper
+days: 7
+```
+
+All keys:
+
+| Key | Default | What |
+| --- | --- | --- |
+| `child` | — | The slug of the child's entities: `sensor.<child>_diaper` and the rest are derived from it. |
+| `diaper_entity`, `bottle_entity`, `solids_entity`, `sleep_entity`, `growth_entity` | from `child` | Each sensor by name instead; `none` leaves one out. At least one sensor, by `child` or by name, is required. |
+| `calendar_entity` | `calendar.<child>_events` | The Huckleberry calendar for **Load older**; `none` hides the button. |
+| `days` | `7` | How many days back the recorder is asked for. |
+| `title` | the child's name from a sensor | The card's title. |
+
+### What it does
+
+- **History**: one websocket call, `history/history_during_period`, for the sensors over the last
+  `days` days (the REST `history/period` endpoint when the websocket command is refused). The
+  diaper, bottle, solids and growth sensors hold the last event's time as their state, so each
+  distinct state in the history is one event, with the attributes of that moment (`type`,
+  `amount` and `units`, `foods`, the measurements); each distinct `previous_start` of the sleep
+  sensor is a finished sleep with its `previous_duration`. A running or paused sleep is shown at
+  the top from the live sensor. Read again whenever one of the sensors changes.
+- **Load older**: `GET calendars/<entity>?start&end` for a 31-day window ending where the list
+  ends, parsed from the integration's event summaries and descriptions ("💧 Diaper (Pee)" with
+  "Pee amount: medium", "🍼 Bottle (4 oz)" with "Type: formula", "🥄 Solids (…)", "💤 Sleep (1h 20m)",
+  "📏 Growth Measurement", also nursing "🍼 Feed", "🚽 Potty", and anything else by its summary).
+  Calendar rows know diaper sizes and notes, which the sensors do not. Events are merged with
+  the history by kind and minute, so the overlap at the boundary shows once.
+- **Rows**: the time, an icon, and one line: `Diaper Mixed · pee medium, poo large`,
+  `Bottle 4 oz formula`, `Sleep 1 h 20 min`, `Growth 7.2 kg · 65.5 cm · 42 cm`, with the note in
+  italics when there is one. Days are "Today", "Yesterday", then "Mon, Oct 20".
+
+### Try it
+
+- `node tests/check-recent.js` checks both parsers, the merging and the day grouping.
+- In a dev Home Assistant without Huckleberry: set the sensors with `POST /api/states/…` a few
+  times with different timestamp states (each becomes a history row), and give the dev HA a
+  Local calendar named `<child> events` with a few events in the integration's wording for
+  **Load older**.
+
 ## Huckleberry growth card
 
 The child's weight, length and head circumference from Huckleberry, plotted against the WHO Child
@@ -150,14 +385,9 @@ Measurement" events) and `sensor.<child>_profile` (the name, birth date and sex)
 
 ### Install
 
-As for the diaper card, with `huckleberry-growth-card.js`:
-
-1. Copy `huckleberry-growth-card.js` to `config/www/huckleberry-growth-card.js`.
-2. **Settings › Dashboards › ⋮ › Resources › Add resource**: URL `/local/huckleberry-growth-card.js`,
-   type **JavaScript module**. Each card file is its own resource.
-3. Reload the browser, then **Edit › Add card › Huckleberry growth card**, or paste the YAML below.
-   The card fills its section (`columns: full`); a one-column sections view or a panel view gives
-   it the whole width.
+See [Install](#install) above. Then **Edit › Add card › Huckleberry growth card**, or paste the
+YAML below. The card fills its section (`columns: full`); a one-column sections view or a panel
+view gives it the whole width.
 
 ### Config
 
@@ -189,6 +419,14 @@ That is all it needs when the profile sensor carries the birth date. All keys:
   `ft`, which is the integration's label for Huckleberry's `ft.in` setting whose values are
   inches). The growth sensor's latest reading is added when it is newer than the last event. Read
   again when the sensor changes and every 30 minutes.
+- **Cache**: each read of the calendar goes to Huckleberry's servers and is slow, so the parsed
+  measurements are kept in the browser's `localStorage` under `huckleberry-growth:<calendar entity>`.
+  On load the cached points show at once and the calendar is asked only from the day before the
+  last cached measurement to today; what comes back is merged in (one point per minute, the new
+  copy winning). A measurement edited or deleted in the Huckleberry app before that date stays as
+  cached until you tap **↻** in the card's header, which clears the cache and reads everything
+  from the birth date again. The cache is per browser (each phone keeps its own) and the card
+  works without it (a private window, or storage full) by reading the whole calendar as before.
 - **Percentiles**: the WHO LMS method, z = ((x/M)^L − 1) / (L·S), with the WHO Child Growth
   Standards tables (weight-for-age, length-for-age and head-circumference-for-age, girls and boys,
   by month from 0 to 24) embedded in the file. Age in months is days / 30.4375, and L, M and S are

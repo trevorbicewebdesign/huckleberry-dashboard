@@ -16,7 +16,7 @@ global.customElements = { _defs: {}, get( n ) { return this._defs[ n ]; }, defin
 global.window = {};
 global.document = { createElement() { return {}; } };
 
-const L = require( path.join( __dirname, '..', 'huckleberry-growth-card.js' ) );
+const L = require( path.join( __dirname, '..', 'dist', 'huckleberry-growth-card.js' ) );
 
 let passed = 0;
 function test( name, fn ) {
@@ -277,6 +277,46 @@ test( 'the chart: five labelled curves, the child\'s points, today, axes in the 
 	const wide = L.chartSvg( { measure: 'length', sex: 'boy', unit: 'cm', span: 3, points: points.map( ( p ) => ( { ...p, metric: 60 } ) ), width: 1200, todayMonths: 6.2, selected: -1, colors } );
 	assert.strictEqual( ( wide.match( /class="pt"/g ) || [] ).length, 1 );
 	assert.ok( wide.includes( 'viewBox="0 0 1200 380"' ) );
+} );
+
+console.log( 'The browser cache' );
+function fakeStorage() {
+	const m = new Map();
+	return { getItem: ( k ) => ( m.has( k ) ? m.get( k ) : null ), setItem: ( k, v ) => m.set( k, String( v ) ), removeItem: ( k ) => m.delete( k ), _m: m };
+}
+test( 'keyed by the calendar entity; written entries read back; junk and other versions ignored', () => {
+	const st = fakeStorage();
+	assert.strictEqual( L.cacheKey( 'calendar.child_events' ), 'huckleberry-growth:calendar.child_events' );
+	assert.strictEqual( L.readCache( st, 'calendar.child_events' ), null );
+	const entries = [ { time: 1000, weight: { value: 3.2, unit: 'kg' }, height: null, head: null } ];
+	assert.strictEqual( L.writeCache( st, 'calendar.child_events', entries, 5000 ), true );
+	assert.deepStrictEqual( L.readCache( st, 'calendar.child_events' ), { entries, to: 5000 } );
+	st.setItem( 'huckleberry-growth:calendar.other_events', '{"v":0,"entries":[]}' );
+	assert.strictEqual( L.readCache( st, 'calendar.other_events' ), null );
+	st.setItem( 'huckleberry-growth:calendar.bad_events', 'not json' );
+	assert.strictEqual( L.readCache( st, 'calendar.bad_events' ), null );
+	L.clearCache( st, 'calendar.child_events' );
+	assert.strictEqual( L.readCache( st, 'calendar.child_events' ), null );
+	assert.strictEqual( L.writeCache( null, 'calendar.child_events', entries, 1 ), false );
+	assert.strictEqual( L.writeCache( { setItem() { throw new Error( 'full' ); } }, 'calendar.x', entries, 1 ), false );
+} );
+test( 'merging: one entry per time, the fresh copy replacing the cached one, sorted', () => {
+	const t1 = Date.parse( '2026-05-20T10:00:00Z' );
+	const t2 = Date.parse( '2026-06-22T10:00:00Z' );
+	const cached = [ { time: t2, weight: { value: 5, unit: 'kg' } }, { time: t1, weight: { value: 4.1, unit: 'kg' } } ];
+	const fresh = [ { time: t2 + 20000, weight: { value: 5.1, unit: 'kg' } }, { time: Date.parse( '2026-08-21T10:00:00Z' ), weight: { value: 6.3, unit: 'kg' } } ];
+	const merged = L.mergeEntries( cached, fresh );
+	assert.deepStrictEqual( merged.map( ( e ) => e.weight.value ), [ 4.1, 5.1, 6.3 ] );
+	assert.deepStrictEqual( L.mergeEntries( null, null ), [] );
+} );
+test( 'the next read starts a day before the last cached event, else a day before birth', () => {
+	const now = Date.parse( '2026-10-27T12:00:00Z' );
+	const birth = Date.parse( '2026-04-20T00:00:00Z' );
+	const last = Date.parse( '2026-10-20T10:00:00Z' );
+	assert.strictEqual( L.fetchStart( { entries: [ { time: birth }, { time: last } ], to: now - 3600000 }, birth, now ), last - 86400000 );
+	assert.strictEqual( L.fetchStart( { entries: [], to: now - 7 * 86400000 }, birth, now ), now - 8 * 86400000 );
+	assert.strictEqual( L.fetchStart( null, birth, now ), birth - 86400000 );
+	assert.strictEqual( L.fetchStart( null, NaN, now ), now - 2 * 366 * 86400000 );
 } );
 
 console.log( '' );

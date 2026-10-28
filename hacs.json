@@ -1,5 +1,6 @@
 {
   "name": "Huckleberry dashboard",
   "render_readme": true,
-  "filename": "huckleberry-diaper-card.js"
+  "filename": "huckleberry-dashboard.js",
+  "content_in_root": false
 }
