@@ -898,7 +898,7 @@
 		calendar_entity: 'Huckleberry calendar',
 	};
 	const HELPERS = {
-		child: 'The middle of the child\'s entity ids: "rose" for sensor.rose_diaper. Fills every entity below.',
+		child: 'The middle of the child\'s entity ids: "mia" for sensor.mia_diaper. Fills every entity below.',
 		title: 'Default: the child\'s name from a sensor.',
 		days: 'Default: 7. These come from Home Assistant\'s own history, so they load at once.',
 		calendar_entity: 'Default: calendar.<child>_events. "Load older" reads earlier months from it.',

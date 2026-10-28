@@ -41,12 +41,12 @@ test( 'defines both elements and registers with the card picker', () => {
 
 console.log( 'Entities' );
 test( 'from the child slug, with explicit keys winning and none turning one off', () => {
-	assert.deepStrictEqual( L.entitiesFrom( { child: 'rose' } ), {
-		diaper: 'sensor.rose_diaper', bottle: 'sensor.rose_bottle', solids: 'sensor.rose_solids', sleep: 'sensor.rose_sleep',
-		growth: 'sensor.rose_growth', calendar: 'calendar.rose_events',
+	assert.deepStrictEqual( L.entitiesFrom( { child: 'mia' } ), {
+		diaper: 'sensor.mia_diaper', bottle: 'sensor.mia_bottle', solids: 'sensor.mia_solids', sleep: 'sensor.mia_sleep',
+		growth: 'sensor.mia_growth', calendar: 'calendar.mia_events',
 	} );
-	const e = L.entitiesFrom( { child: 'Rose Bud', bottle_entity: 'sensor.feeds', calendar_entity: 'none' } );
-	assert.strictEqual( e.diaper, 'sensor.rose_bud_diaper' );
+	const e = L.entitiesFrom( { child: 'Mia Bud', bottle_entity: 'sensor.feeds', calendar_entity: 'none' } );
+	assert.strictEqual( e.diaper, 'sensor.mia_bud_diaper' );
 	assert.strictEqual( e.bottle, 'sensor.feeds' );
 	assert.strictEqual( e.calendar, '' );
 	assert.strictEqual( L.entitiesFrom( { diaper_entity: 'sensor.x' } ).sleep, '' );
