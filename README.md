@@ -331,7 +331,7 @@ The recorder must keep those sensors (it does unless you excluded them) for as m
 
 ```yaml
 type: custom:huckleberry-recent-card
-child: <slug>   # the middle of the entity ids: "rose" for sensor.rose_diaper
+child: <slug>   # the middle of the entity ids: "mia" for sensor.mia_diaper
 days: 7
 ```
 
